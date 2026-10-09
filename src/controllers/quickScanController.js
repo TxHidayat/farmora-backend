@@ -36,6 +36,12 @@ const quickPlantScan = async (req, res) => {
         // CEK FILE FISIK
         // -----------------------------------------------------
 
+        console.log('Quick Scan file debug:', {
+            filePath: req.file.path,
+            absoluteImagePath,
+            exists: fs.existsSync(absoluteImagePath),
+        });
+
         if (!fs.existsSync(absoluteImagePath)) {
             return res.status(500).json({
                 success: false,
