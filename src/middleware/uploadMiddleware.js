@@ -6,7 +6,11 @@ const os = require('os');
 
 // Netlify Functions menggunakan filesystem sementara.
 // Lokal tetap memakai folder uploads/plant-images.
-const isNetlify = Boolean(process.env.NETLIFY);
+const isNetlify = Boolean(
+    process.env.NETLIFY ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.LAMBDA_TASK_ROOT
+);
 
 const uploadDirectory = isNetlify
     ? path.join(os.tmpdir(), 'uploads', 'plant-images')
