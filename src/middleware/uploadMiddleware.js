@@ -1,14 +1,22 @@
+
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
-const uploadDirectory = path.join(
-    process.cwd(),
-    'uploads',
-    'plant-images'
-);
+// Netlify Functions menggunakan filesystem sementara.
+// Lokal tetap memakai folder uploads/plant-images.
+const isNetlify = Boolean(process.env.NETLIFY);
 
-// Buat folder otomatis jika belum ada
+const uploadDirectory = isNetlify
+    ? path.join(os.tmpdir(), 'uploads', 'plant-images')
+    : path.join(
+        process.cwd(),
+        'uploads',
+        'plant-images'
+    );
+
+// Buat folder hanya pada filesystem yang dapat ditulisi.
 if (!fs.existsSync(uploadDirectory)) {
     fs.mkdirSync(uploadDirectory, {
         recursive: true,
@@ -54,9 +62,7 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({
     storage,
-
     fileFilter,
-
     limits: {
         fileSize: 5 * 1024 * 1024,
     },
