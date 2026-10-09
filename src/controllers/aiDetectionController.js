@@ -153,12 +153,7 @@ const uploadPlantImage = async (
         ==========================================
         */
 
-        const imagePath =
-            path.join(
-                'uploads',
-                'plant-images',
-                req.file.filename
-            )
+        const imagePath = req.file.path
             .replace(/\\/g, '/');
 
 
@@ -370,8 +365,11 @@ const analyzeUploadedImage = async (
         ==========================================
         */
 
-        const absoluteImagePath =
-            path.join(
+        const absoluteImagePath = path.isAbsolute(
+            image.image_path
+        )
+            ? image.image_path
+            : path.join(
                 process.cwd(),
                 image.image_path
             );
@@ -520,7 +518,7 @@ const analyzeUploadedImage = async (
             [
 
                 analysis.diagnosis ||
-                    'Tidak dapat ditentukan',
+                'Tidak dapat ditentukan',
 
                 confidence,
 
@@ -529,7 +527,7 @@ const analyzeUploadedImage = async (
                 ),
 
                 analysis.recommendation ||
-                    null,
+                null,
 
                 reportId,
 

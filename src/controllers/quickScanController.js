@@ -26,15 +26,11 @@ const quickPlantScan = async (req, res) => {
             });
         }
 
-        const imagePath = path.join(
-            'uploads',
-            'quick-scans',
-            req.file.filename
-        );
+        const absoluteImagePath = req.file.path;
 
-        const absoluteImagePath = path.resolve(
-            imagePath
-        );
+        const imagePath = path
+            .relative(process.cwd(), absoluteImagePath)
+            .replace(/\\/g, '/');
 
         // -----------------------------------------------------
         // CEK FILE FISIK
