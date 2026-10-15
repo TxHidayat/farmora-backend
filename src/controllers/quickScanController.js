@@ -39,13 +39,7 @@ const quickPlantScan = async (req, res) => {
             .relative(process.cwd(), absoluteImagePath)
             .replace(/\\/g, '/');
 
-        // After uploading to Cloudinary, remove the temporary local file to free space
-        try {
-            fs.unlinkSync(absoluteImagePath);
-            console.log('Temporary upload file removed:', absoluteImagePath);
-        } catch (cleanupError) {
-            console.warn('Failed to delete temporary upload file:', cleanupError);
-        }
+
 
         console.log('Quick Scan file debug:', {
             filePath: req.file.path,
@@ -53,12 +47,7 @@ const quickPlantScan = async (req, res) => {
             exists: fs.existsSync(absoluteImagePath),
         });
 
-        if (!fs.existsSync(absoluteImagePath)) {
-            return res.status(500).json({
-                success: false,
-                message: 'File gambar tidak ditemukan.',
-            });
-        }
+
 
         // -----------------------------------------------------
         // SIMPAN DATA AWAL
@@ -94,41 +83,14 @@ const quickPlantScan = async (req, res) => {
         );
 
         // -----------------------------------------------------
-        // ANALISIS GEMINI
+        // ANALISIS GEMINI (after file still exists)
         // -----------------------------------------------------
-
         try {
-            const analysis =
-                await analyzeQuickPlantImage(
-                    absoluteImagePath
-                );
+            const analysis = await analyzeQuickPlantImage(absoluteImagePath);
 
-            const result = analysis.result || {};
-
-            const plantName =
-                result.plant_name ||
-                result.plant ||
-                'Tidak dapat diidentifikasi';
-
-            const condition =
-                result.condition ||
-                'uncertain';
-
-            const diagnosis =
-                result.diagnosis ||
-                'Tidak dapat ditentukan';
-
-            const confidence =
-                Number(result.confidence) || 0;
-
-            const recommendation =
-                result.recommendation ||
-                'Tidak ada rekomendasi.';
-
-            // -------------------------------------------------
+            // -----------------------------------------------------
             // SIMPAN HASIL ANALISIS
-            // -------------------------------------------------
-
+            // -----------------------------------------------------
             await pool.execute(
                 `
                 UPDATE quick_scans
@@ -140,77 +102,57 @@ const quickPlantScan = async (req, res) => {
                     confidence = ?,
                     result = ?,
                     recommendation = ?,
-                    error_message = NULL
+                    error_message = NULL,
+                    image_public_id = ?
                 WHERE id = ?
                   AND user_id = ?
                 `,
                 [
-                    plantName,
-                    condition,
-                    diagnosis,
-                    confidence,
-                    JSON.stringify(result),
-                    recommendation,
+                    analysis.result.plant_name || analysis.result.plant || 'Tidak dapat diidentifikasi',
+                    analysis.result.condition || 'uncertain',
+                    analysis.result.diagnosis || 'Tidak dapat ditentukan',
+                    analysis.result.confidence || 0,
+                    JSON.stringify(analysis.result),
+                    analysis.result.recommendation || 'Tidak ada rekomendasi.',
+                    uploadResult.public_id,
                     scanId,
                     userId,
                 ]
             );
 
-            console.log(
-                `Quick Plant Scan selesai. Scan ID: ${scanId}`
-            );
+            console.log(`Quick Plant Scan selesai. Scan ID: ${scanId}`);
 
             return res.status(200).json({
                 success: true,
-                message:
-                    'Analisis tanaman berhasil.',
+                message: 'Analisis tanaman berhasil.',
                 data: {
                     scan_id: scanId,
-
                     image_url: imageUrl,
-
-                    image_name:
-                        req.file.originalname,
-
-                    plant_name:
-                        plantName,
-
-                    condition:
-                        condition,
-
-                    diagnosis:
-                        diagnosis,
-
-                    confidence:
-                        confidence,
-
-                    symptoms:
-                        result.symptoms || [],
-
-                    possible_causes:
-                        result.possible_causes ||
-                        [],
-
-                    recommendation:
-                        recommendation,
-
-                    observation:
-                        result.observation ||
-                        '',
-
-                    result,
+                    image_name: req.file.originalname,
+                    plant_name: analysis.result.plant_name || analysis.result.plant || 'Tidak dapat diidentifikasi',
+                    condition: analysis.result.condition || 'uncertain',
+                    diagnosis: analysis.result.diagnosis || 'Tidak dapat ditentukan',
+                    confidence: analysis.result.confidence || 0,
+                    symptoms: analysis.result.symptoms || [],
+                    possible_causes: analysis.result.possible_causes || [],
+                    recommendation: analysis.result.recommendation || 'Tidak ada rekomendasi.',
+                    observation: analysis.result.observation || '',
+                    result: analysis.result,
                 },
             });
-
         } catch (analysisError) {
             // -------------------------------------------------
             // GAGAL ANALISIS
             // -------------------------------------------------
+            console.error('Quick Plant Scan analysis error:', analysisError);
 
-            console.error(
-                'Quick Plant Scan analysis error:',
-                analysisError
-            );
+            // Cleanup Cloudinary asset to avoid orphaned image
+            try {
+                await cloudinary.uploader.destroy(uploadResult.public_id);
+                console.log('Orphan Cloudinary image removed after Gemini failure');
+            } catch (cloudErr) {
+                console.warn('Failed to delete Cloudinary image after Gemini error:', cloudErr);
+            }
 
             await pool.execute(
                 `
@@ -221,20 +163,22 @@ const quickPlantScan = async (req, res) => {
                 WHERE id = ?
                   AND user_id = ?
                 `,
-                [
-                    analysisError.message,
-                    scanId,
-                    userId,
-                ]
+                [analysisError.message, scanId, userId]
             );
 
             return res.status(500).json({
                 success: false,
-                message:
-                    'Gagal menganalisis gambar tanaman.',
-                error:
-                    analysisError.message,
+                message: 'Gagal menganalisis gambar tanaman.',
+                error: analysisError.message,
             });
+        } finally {
+            // Ensure temporary file removal after analysis (success or failure)
+            try {
+                fs.unlinkSync(absoluteImagePath);
+                console.log('Temporary file removed after Gemini processing:', absoluteImagePath);
+            } catch (cleanupError) {
+                console.warn('Failed to delete temporary file after Gemini processing:', cleanupError);
+            }
         }
 
     } catch (error) {
@@ -334,7 +278,8 @@ const deleteQuickScan = async (req, res) => {
             `
             SELECT
                 id,
-                image_path
+                image_path,
+                image_public_id
             FROM quick_scans
             WHERE id = ?
               AND user_id = ?
@@ -430,7 +375,8 @@ const deleteAllQuickScans = async (req, res) => {
             `
             SELECT
                 id,
-                image_path
+                image_path,
+                image_public_id
             FROM quick_scans
             WHERE user_id = ?
             `,
