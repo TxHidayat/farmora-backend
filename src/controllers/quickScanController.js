@@ -1,11 +1,15 @@
 const path = require('path');
 const fs = require('fs');
 
-const pool = require('../config/database');
+const cloudinary = require('cloudinary').v2;
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
-const {
-    analyzeQuickPlantImage,
-} = require('../services/geminiService');
+const pool = require('../config/database');
+const { analyzeQuickPlantImage } = require('../services/geminiService');
 
 // =========================================================
 // QUICK PLANT SCAN
@@ -27,14 +31,21 @@ const quickPlantScan = async (req, res) => {
         }
 
         const absoluteImagePath = req.file.path;
-
+        const uploadResult = await cloudinary.uploader.upload(absoluteImagePath, {
+            folder: 'quick_scans',
+        });
+        const imageUrl = uploadResult.secure_url;
         const imagePath = path
             .relative(process.cwd(), absoluteImagePath)
             .replace(/\\/g, '/');
 
-        // -----------------------------------------------------
-        // CEK FILE FISIK
-        // -----------------------------------------------------
+        // After uploading to Cloudinary, remove the temporary local file to free space
+        try {
+            fs.unlinkSync(absoluteImagePath);
+            console.log('Temporary upload file removed:', absoluteImagePath);
+        } catch (cleanupError) {
+            console.warn('Failed to delete temporary upload file:', cleanupError);
+        }
 
         console.log('Quick Scan file debug:', {
             filePath: req.file.path,
@@ -58,16 +69,18 @@ const quickPlantScan = async (req, res) => {
             INSERT INTO quick_scans (
                 user_id,
                 image_path,
+                image_public_id,
                 image_name,
                 mime_type,
                 file_size,
                 status
             )
-            VALUES (?, ?, ?, ?, ?, 'processing')
+            VALUES (?, ?, ?, ?, ?, ?, 'processing')
             `,
             [
                 userId,
-                imagePath.replace(/\\/g, '/'),
+                uploadResult.secure_url,
+                uploadResult.public_id,
                 req.file.originalname,
                 req.file.mimetype,
                 req.file.size,
@@ -154,11 +167,7 @@ const quickPlantScan = async (req, res) => {
                 data: {
                     scan_id: scanId,
 
-                    image_path:
-                        imagePath.replace(
-                            /\\/g,
-                            '/'
-                        ),
+                    image_url: imageUrl,
 
                     image_name:
                         req.file.originalname,
@@ -367,18 +376,20 @@ const deleteQuickScan = async (req, res) => {
         // HAPUS FILE GAMBAR
         // -----------------------------------------------------
 
-        if (scan.image_path) {
-            const imagePath =
-                path.resolve(
-                    scan.image_path
-                );
-
+        if (scan.image_path && scan.image_path.startsWith('http') && scan.image_public_id) {
+            // Delete from Cloudinary
+            cloudinary.uploader.destroy(scan.image_public_id, (error, result) => {
+                if (error) {
+                    console.error('Cloudinary deletion error:', error);
+                } else {
+                    console.log('Cloudinary image deleted:', result);
+                }
+            });
+        } else if (scan.image_path && !scan.image_path.startsWith('http')) {
+            const imagePath = path.resolve(scan.image_path);
             if (fs.existsSync(imagePath)) {
                 fs.unlinkSync(imagePath);
-
-                console.log(
-                    `File Quick Scan dihapus: ${imagePath}`
-                );
+                console.log(`File Quick Scan dihapus: ${imagePath}`);
             }
         }
 
@@ -464,18 +475,22 @@ const deleteAllQuickScans = async (req, res) => {
             }
 
             try {
-                const imagePath =
-                    path.resolve(
-                        scan.image_path
-                    );
-
+            if (scan.image_path && scan.image_path.startsWith('http') && scan.image_public_id) {
+                // Delete from Cloudinary
+                cloudinary.uploader.destroy(scan.image_public_id, (error, result) => {
+                    if (error) {
+                        console.error('Cloudinary deletion error:', error);
+                    } else {
+                        console.log('Cloudinary image deleted:', result);
+                    }
+                });
+            } else if (scan.image_path && !scan.image_path.startsWith('http')) {
+                const imagePath = path.resolve(scan.image_path);
                 if (fs.existsSync(imagePath)) {
-                    fs.unlinkSync(
-                        imagePath
-                    );
-
+                    fs.unlinkSync(imagePath);
                     deletedFiles++;
                 }
+            }
             } catch (fileError) {
                 console.error(
                     `Gagal menghapus file Quick Scan ${scan.image_path}:`,
