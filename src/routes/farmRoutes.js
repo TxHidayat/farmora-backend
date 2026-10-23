@@ -9,11 +9,13 @@ const {
 } = require('../controllers/farmController');
 
 const authenticateToken = require('../middleware/authMiddleware');
+const { demoBlockMiddleware } = require('../middleware/demoMiddleware');
 
 const router = express.Router();
 
-// Semua endpoint farm membutuhkan JWT
+// Semua endpoint farm membutuhkan JWT dan pembatasan demo
 router.use(authenticateToken);
+router.use(demoBlockMiddleware);
 
 // GET semua kebun user
 router.get('/', getFarms);

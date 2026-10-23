@@ -27,12 +27,9 @@ const getActivities = async (req, res) => {
                 farms.id AS farm_id,
                 farms.name AS farm_name
              FROM activities a
-             INNER JOIN crop_cycles cc
-                ON cc.id = a.crop_cycle_id
-             INNER JOIN fields f
-                ON f.id = cc.field_id
-             INNER JOIN farms
-                ON farms.id = f.farm_id
+             INNER JOIN crop_cycles cc ON cc.id = a.crop_cycle_id
+             INNER JOIN fields f ON f.id = cc.field_id
+             INNER JOIN farms ON farms.id = f.farm_id
              WHERE farms.user_id = ?
              ORDER BY a.activity_date DESC, a.created_at DESC`,
             [userId]
@@ -42,7 +39,6 @@ const getActivities = async (req, res) => {
             success: true,
             data: activities
         });
-
     } catch (error) {
         console.error('Get activities error:', error);
 
@@ -52,7 +48,6 @@ const getActivities = async (req, res) => {
         });
     }
 };
-
 
 // ==============================
 // GET ACTIVITY BY ID
@@ -82,14 +77,11 @@ const getActivityById = async (req, res) => {
                 farms.id AS farm_id,
                 farms.name AS farm_name
              FROM activities a
-             INNER JOIN crop_cycles cc
-                ON cc.id = a.crop_cycle_id
-             INNER JOIN fields f
-                ON f.id = cc.field_id
-             INNER JOIN farms
-                ON farms.id = f.farm_id
+             INNER JOIN crop_cycles cc ON cc.id = a.crop_cycle_id
+             INNER JOIN fields f ON f.id = cc.field_id
+             INNER JOIN farms ON farms.id = f.farm_id
              WHERE a.id = ?
-             AND farms.user_id = ?`,
+               AND farms.user_id = ?`,
             [activityId, userId]
         );
 
@@ -104,7 +96,6 @@ const getActivityById = async (req, res) => {
             success: true,
             data: activities[0]
         });
-
     } catch (error) {
         console.error('Get activity error:', error);
 
@@ -115,13 +106,17 @@ const getActivityById = async (req, res) => {
     }
 };
 
-
 // ==============================
 // CREATE ACTIVITY
 // ==============================
 const createActivity = async (req, res) => {
     try {
         const userId = req.user.userId;
+
+        // Debug sementara untuk melacak request POST.
+        console.log('CREATE ACTIVITY HIT');
+        console.log('User ID:', userId);
+        console.log('Request body keys:', Object.keys(req.body || {}));
 
         const {
             crop_cycle_id,
@@ -134,48 +129,65 @@ const createActivity = async (req, res) => {
             notes
         } = req.body;
 
-        // Validasi input wajib
+        // Validasi field wajib
         if (!crop_cycle_id || !activity_type || !activity_date) {
             return res.status(400).json({
                 success: false,
-                message: 'crop_cycle_id, jenis aktivitas, dan tanggal wajib diisi'
+                message: 'crop_cycle_id, activity_type, dan activity_date wajib diisi'
             });
         }
 
-        // Validasi quantity
+        if (typeof activity_type !== 'string' || !activity_type.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Jenis aktivitas harus berupa teks yang valid'
+            });
+        }
+
+        // Validasi format tanggal
         if (
-            quantity !== undefined &&
-            quantity !== null &&
-            Number(quantity) < 0
+            typeof activity_date !== 'string' ||
+            !/^\d{4}-\d{2}-\d{2}$/.test(activity_date) ||
+            Number.isNaN(Date.parse(`${activity_date}T00:00:00Z`))
         ) {
             return res.status(400).json({
                 success: false,
-                message: 'Jumlah tidak boleh negatif'
+                message: 'Tanggal aktivitas harus menggunakan format YYYY-MM-DD'
             });
         }
 
-        // Validasi cost
-        if (
-            cost !== undefined &&
-            cost !== null &&
-            Number(cost) < 0
-        ) {
-            return res.status(400).json({
-                success: false,
-                message: 'Biaya tidak boleh negatif'
-            });
+        // Validasi jumlah
+        if (quantity !== undefined && quantity !== null && quantity !== '') {
+            const quantityValue = Number(quantity);
+
+            if (!Number.isFinite(quantityValue) || quantityValue < 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Jumlah harus berupa angka valid dan tidak boleh negatif'
+                });
+            }
         }
 
-        // Pastikan crop cycle milik user
+        // Validasi biaya
+        if (cost !== undefined && cost !== null && cost !== '') {
+            const costValue = Number(cost);
+
+            if (!Number.isFinite(costValue) || costValue < 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Biaya harus berupa angka valid dan tidak boleh negatif'
+                });
+            }
+        }
+
+        // Pastikan crop cycle milik user yang login
         const [cropCycles] = await pool.execute(
             `SELECT cc.id
              FROM crop_cycles cc
-             INNER JOIN fields f
-                ON f.id = cc.field_id
-             INNER JOIN farms
-                ON farms.id = f.farm_id
+             INNER JOIN fields f ON f.id = cc.field_id
+             INNER JOIN farms ON farms.id = f.farm_id
              WHERE cc.id = ?
-             AND farms.user_id = ?`,
+               AND farms.user_id = ?`,
             [crop_cycle_id, userId]
         );
 
@@ -186,10 +198,9 @@ const createActivity = async (req, res) => {
             });
         }
 
-        // Insert activity
+        // Simpan aktivitas
         const [result] = await pool.execute(
-            `INSERT INTO activities
-            (
+            `INSERT INTO activities (
                 crop_cycle_id,
                 activity_type,
                 activity_date,
@@ -198,16 +209,15 @@ const createActivity = async (req, res) => {
                 unit,
                 cost,
                 notes
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 crop_cycle_id,
                 activity_type.trim(),
                 activity_date,
                 description || null,
-                quantity ?? null,
+                quantity === '' || quantity === undefined ? null : quantity,
                 unit || null,
-                cost ?? 0,
+                cost === '' || cost === undefined || cost === null ? 0 : cost,
                 notes || null
             ]
         );
@@ -221,15 +231,21 @@ const createActivity = async (req, res) => {
                 activity_type: activity_type.trim(),
                 activity_date,
                 description: description || null,
-                quantity: quantity ?? null,
+                quantity: quantity === '' || quantity === undefined ? null : quantity,
                 unit: unit || null,
-                cost: cost ?? 0,
+                cost: cost === '' || cost === undefined || cost === null ? 0 : cost,
                 notes: notes || null
             }
         });
-
     } catch (error) {
-        console.error('Create activity error:', error);
+        // Detail error hanya ditampilkan di terminal backend
+        console.error('=== CREATE ACTIVITY ERROR ===');
+        console.error('Error name:', error.name);
+        console.error('Error code:', error.code);
+        console.error('Error message:', error.message);
+        console.error('SQL state:', error.sqlState);
+        console.error('SQL message:', error.sqlMessage);
+        console.error('Error stack:', error.stack);
 
         return res.status(500).json({
             success: false,
@@ -237,7 +253,6 @@ const createActivity = async (req, res) => {
         });
     }
 };
-
 
 // ==============================
 // UPDATE ACTIVITY
@@ -258,46 +273,61 @@ const updateActivity = async (req, res) => {
             notes
         } = req.body;
 
-        // Validasi
         if (!crop_cycle_id || !activity_type || !activity_date) {
             return res.status(400).json({
                 success: false,
-                message: 'crop_cycle_id, jenis aktivitas, dan tanggal wajib diisi'
+                message: 'crop_cycle_id, activity_type, dan activity_date wajib diisi'
+            });
+        }
+
+        if (typeof activity_type !== 'string' || !activity_type.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Jenis aktivitas harus berupa teks yang valid'
             });
         }
 
         if (
-            quantity !== undefined &&
-            quantity !== null &&
-            Number(quantity) < 0
+            typeof activity_date !== 'string' ||
+            !/^\d{4}-\d{2}-\d{2}$/.test(activity_date) ||
+            Number.isNaN(Date.parse(`${activity_date}T00:00:00Z`))
         ) {
             return res.status(400).json({
                 success: false,
-                message: 'Jumlah tidak boleh negatif'
+                message: 'Tanggal aktivitas harus menggunakan format YYYY-MM-DD'
             });
         }
 
-        if (
-            cost !== undefined &&
-            cost !== null &&
-            Number(cost) < 0
-        ) {
-            return res.status(400).json({
-                success: false,
-                message: 'Biaya tidak boleh negatif'
-            });
+        if (quantity !== undefined && quantity !== null && quantity !== '') {
+            const quantityValue = Number(quantity);
+
+            if (!Number.isFinite(quantityValue) || quantityValue < 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Jumlah harus berupa angka valid dan tidak boleh negatif'
+                });
+            }
         }
 
-        // Pastikan crop cycle baru milik user
+        if (cost !== undefined && cost !== null && cost !== '') {
+            const costValue = Number(cost);
+
+            if (!Number.isFinite(costValue) || costValue < 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Biaya harus berupa angka valid dan tidak boleh negatif'
+                });
+            }
+        }
+
+        // Pastikan crop cycle tujuan milik user
         const [cropCycles] = await pool.execute(
             `SELECT cc.id
              FROM crop_cycles cc
-             INNER JOIN fields f
-                ON f.id = cc.field_id
-             INNER JOIN farms
-                ON farms.id = f.farm_id
+             INNER JOIN fields f ON f.id = cc.field_id
+             INNER JOIN farms ON farms.id = f.farm_id
              WHERE cc.id = ?
-             AND farms.user_id = ?`,
+               AND farms.user_id = ?`,
             [crop_cycle_id, userId]
         );
 
@@ -308,18 +338,15 @@ const updateActivity = async (req, res) => {
             });
         }
 
-        // Pastikan activity lama milik user
+        // Pastikan aktivitas yang akan diubah milik user
         const [existingActivity] = await pool.execute(
             `SELECT a.id
              FROM activities a
-             INNER JOIN crop_cycles cc
-                ON cc.id = a.crop_cycle_id
-             INNER JOIN fields f
-                ON f.id = cc.field_id
-             INNER JOIN farms
-                ON farms.id = f.farm_id
+             INNER JOIN crop_cycles cc ON cc.id = a.crop_cycle_id
+             INNER JOIN fields f ON f.id = cc.field_id
+             INNER JOIN farms ON farms.id = f.farm_id
              WHERE a.id = ?
-             AND farms.user_id = ?`,
+               AND farms.user_id = ?`,
             [activityId, userId]
         );
 
@@ -332,24 +359,23 @@ const updateActivity = async (req, res) => {
 
         await pool.execute(
             `UPDATE activities
-             SET
-                crop_cycle_id = ?,
-                activity_type = ?,
-                activity_date = ?,
-                description = ?,
-                quantity = ?,
-                unit = ?,
-                cost = ?,
-                notes = ?
+             SET crop_cycle_id = ?,
+                 activity_type = ?,
+                 activity_date = ?,
+                 description = ?,
+                 quantity = ?,
+                 unit = ?,
+                 cost = ?,
+                 notes = ?
              WHERE id = ?`,
             [
                 crop_cycle_id,
                 activity_type.trim(),
                 activity_date,
                 description || null,
-                quantity ?? null,
+                quantity === '' || quantity === undefined ? null : quantity,
                 unit || null,
-                cost ?? 0,
+                cost === '' || cost === undefined || cost === null ? 0 : cost,
                 notes || null,
                 activityId
             ]
@@ -359,9 +385,10 @@ const updateActivity = async (req, res) => {
             success: true,
             message: 'Aktivitas berhasil diperbarui'
         });
-
     } catch (error) {
         console.error('Update activity error:', error);
+        console.error('Error code:', error.code);
+        console.error('Error message:', error.message);
 
         return res.status(500).json({
             success: false,
@@ -369,7 +396,6 @@ const updateActivity = async (req, res) => {
         });
     }
 };
-
 
 // ==============================
 // DELETE ACTIVITY
@@ -379,18 +405,15 @@ const deleteActivity = async (req, res) => {
         const userId = req.user.userId;
         const activityId = req.params.id;
 
-        // Pastikan activity milik user
+        // Pastikan aktivitas milik user
         const [existingActivity] = await pool.execute(
             `SELECT a.id
              FROM activities a
-             INNER JOIN crop_cycles cc
-                ON cc.id = a.crop_cycle_id
-             INNER JOIN fields f
-                ON f.id = cc.field_id
-             INNER JOIN farms
-                ON farms.id = f.farm_id
+             INNER JOIN crop_cycles cc ON cc.id = a.crop_cycle_id
+             INNER JOIN fields f ON f.id = cc.field_id
+             INNER JOIN farms ON farms.id = f.farm_id
              WHERE a.id = ?
-             AND farms.user_id = ?`,
+               AND farms.user_id = ?`,
             [activityId, userId]
         );
 
@@ -402,8 +425,7 @@ const deleteActivity = async (req, res) => {
         }
 
         await pool.execute(
-            `DELETE FROM activities
-             WHERE id = ?`,
+            `DELETE FROM activities WHERE id = ?`,
             [activityId]
         );
 
@@ -411,9 +433,10 @@ const deleteActivity = async (req, res) => {
             success: true,
             message: 'Aktivitas berhasil dihapus'
         });
-
     } catch (error) {
         console.error('Delete activity error:', error);
+        console.error('Error code:', error.code);
+        console.error('Error message:', error.message);
 
         return res.status(500).json({
             success: false,
@@ -421,7 +444,6 @@ const deleteActivity = async (req, res) => {
         });
     }
 };
-
 
 module.exports = {
     getActivities,

@@ -9,11 +9,13 @@ const {
 } = require('../controllers/activityController');
 
 const authenticateToken = require('../middleware/authMiddleware');
+const { demoBlockMiddleware } = require('../middleware/demoMiddleware');
 
 const router = express.Router();
 
-// Semua endpoint membutuhkan JWT
+// Semua endpoint membutuhkan JWT dan pembatasan demo
 router.use(authenticateToken);
+router.use(demoBlockMiddleware);
 
 // GET semua aktivitas
 router.get('/', getActivities);

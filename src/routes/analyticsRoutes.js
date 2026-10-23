@@ -8,11 +8,13 @@ const {
 } = require('../controllers/analyticsController');
 
 const authenticateToken = require('../middleware/authMiddleware');
+const { demoBlockMiddleware } = require('../middleware/demoMiddleware');
 
 const router = express.Router();
 
-// Semua analytics membutuhkan JWT
+// Semua analytics membutuhkan JWT dan pembatasan demo
 router.use(authenticateToken);
+router.use(demoBlockMiddleware);
 
 // Ringkasan analytics
 router.get(

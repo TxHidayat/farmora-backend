@@ -3,6 +3,11 @@ const express = require('express');
 const authenticateToken =
     require('../middleware/authMiddleware');
 
+const {
+    demoBlockMiddleware,
+    demoAiBlockMiddleware
+} = require('../middleware/demoMiddleware');
+
 const upload =
     require('../middleware/uploadMiddleware');
 
@@ -20,12 +25,16 @@ const router =
 
 /*
 ==================================================
-AUTHENTICATION
+AUTHENTICATION & DEMO RESTRICTION
 ==================================================
 */
 
 router.use(
     authenticateToken
+);
+
+router.use(
+    demoBlockMiddleware
 );
 
 
@@ -37,6 +46,7 @@ UPLOAD GAMBAR
 
 router.post(
     '/images',
+    demoAiBlockMiddleware,
     upload.single('image'),
     uploadPlantImage
 );
@@ -50,6 +60,7 @@ ANALISIS AI
 
 router.post(
     '/images/:id/analyze',
+    demoAiBlockMiddleware,
     analyzeUploadedImage
 );
 

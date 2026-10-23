@@ -9,11 +9,13 @@ const {
 } = require('../controllers/fieldController');
 
 const authenticateToken = require('../middleware/authMiddleware');
+const { demoBlockMiddleware } = require('../middleware/demoMiddleware');
 
 const router = express.Router();
 
-// Semua endpoint field membutuhkan JWT
+// Semua endpoint field membutuhkan JWT dan pembatasan demo
 router.use(authenticateToken);
+router.use(demoBlockMiddleware);
 
 // GET semua lahan
 router.get('/', getFields);

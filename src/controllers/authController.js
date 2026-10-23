@@ -91,7 +91,8 @@ const login = async (req, res) => {
                 name,
                 email,
                 password_hash,
-                phone
+                phone,
+                is_demo
              FROM users
              WHERE email = ?`,
             [email]
@@ -118,9 +119,12 @@ const login = async (req, res) => {
             });
         }
 
+        const isDemo = Boolean(user.is_demo);
+
         const token = jwt.sign(
             {
-                userId: user.id
+                userId: user.id,
+                isDemo
             },
             process.env.JWT_SECRET,
             {
@@ -136,7 +140,8 @@ const login = async (req, res) => {
                     id: user.id,
                     name: user.name,
                     email: user.email,
-                    phone: user.phone
+                    phone: user.phone,
+                    is_demo: isDemo
                 },
                 token
             }
@@ -144,6 +149,70 @@ const login = async (req, res) => {
 
     } catch (error) {
         console.error('Login error:', error);
+
+        return res.status(500).json({
+            success: false,
+            message: 'Terjadi kesalahan pada server'
+        });
+    }
+};
+
+
+// ==============================
+// DEMO LOGIN
+// ==============================
+const demoLogin = async (req, res) => {
+    try {
+        const [users] = await pool.execute(
+            `SELECT
+                id,
+                name,
+                email,
+                phone,
+                is_demo
+             FROM users
+             WHERE is_demo = 1 OR email = 'demo@farmora.com'
+             ORDER BY id ASC
+             LIMIT 1`
+        );
+
+        if (users.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Akun demo belum dikonfigurasi'
+            });
+        }
+
+        const user = users[0];
+
+        const token = jwt.sign(
+            {
+                userId: user.id,
+                isDemo: true
+            },
+            process.env.JWT_SECRET,
+            {
+                expiresIn: '7d'
+            }
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: 'Login Mode Demo berhasil',
+            data: {
+                user: {
+                    id: user.id,
+                    name: user.name,
+                    email: user.email,
+                    phone: user.phone,
+                    is_demo: true
+                },
+                token
+            }
+        });
+
+    } catch (error) {
+        console.error('Demo login error:', error);
 
         return res.status(500).json({
             success: false,
@@ -164,6 +233,7 @@ const getMe = async (req, res) => {
                 name,
                 email,
                 phone,
+                is_demo,
                 created_at
              FROM users
              WHERE id = ?`,
@@ -177,9 +247,14 @@ const getMe = async (req, res) => {
             });
         }
 
+        const user = users[0];
+
         return res.status(200).json({
             success: true,
-            data: users[0]
+            data: {
+                ...user,
+                is_demo: Boolean(user.is_demo)
+            }
         });
 
     } catch (error) {
@@ -196,5 +271,6 @@ const getMe = async (req, res) => {
 module.exports = {
     register,
     login,
+    demoLogin,
     getMe
 };

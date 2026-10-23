@@ -3,6 +3,11 @@ const express = require('express');
 const authenticateToken =
     require('../middleware/authMiddleware');
 
+const {
+    demoBlockMiddleware,
+    demoAiBlockMiddleware
+} = require('../middleware/demoMiddleware');
+
 const upload =
     require('../middleware/quickScanUploadMiddleware');
 
@@ -16,11 +21,15 @@ const {
 const router = express.Router();
 
 // =========================================================
-// AUTHENTICATION
+// AUTHENTICATION & DEMO RESTRICTION
 // =========================================================
 
 router.use(
     authenticateToken
+);
+
+router.use(
+    demoBlockMiddleware
 );
 
 // =========================================================
@@ -29,6 +38,7 @@ router.use(
 
 router.post(
     '/quick-scan',
+    demoAiBlockMiddleware,
     upload.single('image'),
     quickPlantScan
 );
