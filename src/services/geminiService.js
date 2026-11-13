@@ -76,6 +76,68 @@ const normalizeArray = (value) => {
 };
 
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+
+const isTransientError = (error) => {
+    if (!error) return false;
+
+    const status = Number(
+        error.status ||
+        error.statusCode ||
+        error.response?.status ||
+        error.code
+    );
+
+    const permanentCodes = [400, 401, 403, 404];
+    if (permanentCodes.includes(status)) {
+        return false;
+    }
+
+    const message = (error.message || '').toLowerCase();
+
+    if (
+        message.includes('api_key') ||
+        message.includes('api key') ||
+        message.includes('unauthenticated') ||
+        message.includes('permission_denied') ||
+        message.includes('permission denied') ||
+        message.includes('invalid argument') ||
+        message.includes('not found')
+    ) {
+        return false;
+    }
+
+    const transientCodes = [503, 429, 500, 502, 504];
+    if (transientCodes.includes(status)) {
+        return true;
+    }
+
+    if (
+        message.includes('503') ||
+        message.includes('unavailable') ||
+        message.includes('high demand') ||
+        message.includes('capacity') ||
+        message.includes('overloaded') ||
+        message.includes('429') ||
+        message.includes('resource_exhausted') ||
+        message.includes('rate limit') ||
+        message.includes('too many requests') ||
+        message.includes('500') ||
+        message.includes('internal error') ||
+        message.includes('internal server error') ||
+        message.includes('service unavailable') ||
+        message.includes('fetch failed') ||
+        message.includes('econnreset') ||
+        message.includes('etimedout')
+    ) {
+        return true;
+    }
+
+    return false;
+};
+
+
 // =====================================================
 // HITUNG CONFIDENCE
 // =====================================================
@@ -1021,49 +1083,85 @@ Jangan menggunakan 85 sebagai default.
 
 
     // =================================================
-    // REQUEST GEMINI
+    // REQUEST GEMINI DENGAN RETRY BERTAHAP
     // =================================================
 
-    console.log(
-        'Mengirim Quick Plant Scan ke Gemini...'
-    );
+    const maxRetries = 2; // Maksimal 2 kali retry (total 3 kali percobaan)
+    const retryDelays = [1500, 3000]; // Jeda bertahap: 1.5 detik lalu 3 detik
+    let response = null;
+    let lastError = null;
 
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            if (attempt > 0) {
+                console.log(
+                    `[Quick Scan] Percobaan ulang ke-${attempt} menghubungkan ke Gemini...`
+                );
+            } else {
+                console.log(
+                    'Mengirim Quick Plant Scan ke Gemini...'
+                );
+            }
 
-    const response =
-        await ai.models.generateContent({
-
-            model:
-                'gemini-3.5-flash-lite',
-
-            contents: [
-
-                {
-                    inlineData: {
-
-                        mimeType,
-
-                        data:
-                            base64Image,
-
+            response =
+                await ai.models.generateContent({
+                    model:
+                        'gemini-3.5-flash-lite',
+                    contents: [
+                        {
+                            inlineData: {
+                                mimeType,
+                                data:
+                                    base64Image,
+                            },
+                        },
+                        {
+                            text:
+                                prompt,
+                        },
+                    ],
+                    config: {
+                        responseMimeType:
+                            'application/json',
                     },
+                });
 
-                },
+            // Berhasil mendapatkan respons
+            break;
+        } catch (err) {
+            lastError = err;
+            console.error(
+                `[Quick Scan] Percobaan ${attempt + 1} gagal:`,
+                err.message || err
+            );
 
-                {
-                    text:
-                        prompt,
-                },
+            // Jangan retry untuk error permanen (misal: API key tidak valid, bad request)
+            if (!isTransientError(err)) {
+                console.warn(
+                    '[Quick Scan] Error tergolong permanen, tidak akan mencoba ulang.'
+                );
+                throw err;
+            }
 
-            ],
+            // Jika masih dalam jatah retry, tunggu dengan jeda bertahap
+            if (attempt < maxRetries) {
+                const delayMs = retryDelays[attempt] || 2000;
+                console.log(
+                    `[Quick Scan] Error sementara terdeteksi (${err.status || err.code || '503/429/500'}). Menunggu ${delayMs}ms sebelum mencoba lagi...`
+                );
+                await sleep(delayMs);
+            }
+        }
+    }
 
-            config: {
-
-                responseMimeType:
-                    'application/json',
-
-            },
-
-        });
+    if (!response) {
+        const busyError = new Error(
+            'Layanan AI sedang sibuk. Silakan coba kembali beberapa saat lagi.'
+        );
+        busyError.isTransient = true;
+        busyError.originalError = lastError;
+        throw busyError;
+    }
 
 
     // =================================================
@@ -1282,5 +1380,7 @@ module.exports = {
     analyzePlantImage,
 
     analyzeQuickPlantImage,
+
+    isTransientError,
 
 };

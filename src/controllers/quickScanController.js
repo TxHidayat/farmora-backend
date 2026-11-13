@@ -9,7 +9,7 @@ cloudinary.config({
 });
 
 const pool = require('../config/database');
-const { analyzeQuickPlantImage } = require('../services/geminiService');
+const { analyzeQuickPlantImage, isTransientError } = require('../services/geminiService');
 
 // =========================================================
 // QUICK PLANT SCAN
@@ -166,16 +166,23 @@ const quickPlantScan = async (req, res) => {
                 [analysisError.message, scanId, userId]
             );
 
-            return res.status(500).json({
+            const isBusy = analysisError.isTransient || isTransientError(analysisError);
+            const userMessage = isBusy
+                ? 'Layanan AI sedang sibuk. Silakan coba kembali beberapa saat lagi.'
+                : (analysisError.message || 'Gagal menganalisis gambar tanaman.');
+
+            return res.status(isBusy ? 503 : 500).json({
                 success: false,
-                message: 'Gagal menganalisis gambar tanaman.',
-                error: analysisError.message,
+                message: userMessage,
+                error: analysisError.originalError?.message || analysisError.message,
             });
         } finally {
             // Ensure temporary file removal after analysis (success or failure)
             try {
-                fs.unlinkSync(absoluteImagePath);
-                console.log('Temporary file removed after Gemini processing:', absoluteImagePath);
+                if (fs.existsSync(absoluteImagePath)) {
+                    fs.unlinkSync(absoluteImagePath);
+                    console.log('Temporary file removed after Gemini processing:', absoluteImagePath);
+                }
             } catch (cleanupError) {
                 console.warn('Failed to delete temporary file after Gemini processing:', cleanupError);
             }
